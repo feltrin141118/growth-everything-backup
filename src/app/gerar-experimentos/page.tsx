@@ -233,17 +233,28 @@ export default function GerarExperimentos() {
         }),
       })
 
-      const data = await response.json()
+      const text = await response.text()
+      let data: { error?: string; experiments?: Experiment[] } = {}
+      try {
+        data = text ? JSON.parse(text) : {}
+      } catch {
+        setError(
+          response.ok
+            ? 'Resposta da API em formato inválido.'
+            : `Erro no servidor (${response.status}). Verifique o console do servidor e se OPENAI_API_KEY e Supabase estão configurados.`
+        )
+        return
+      }
 
       if (!response.ok) {
-        throw new Error(data.error || 'Erro ao gerar experimentos')
+        throw new Error(data.error || `Erro ${response.status} ao gerar experimentos`)
       }
 
       const saved = (data.experiments || []) as Experiment[]
       setExperiments(saved)
       await fetchBacklogExperiments(saved.map((e) => e.id))
     } catch (err: any) {
-      setError(err.message || 'Erro ao gerar experimentos')
+      setError(err?.message || 'Erro ao gerar experimentos')
     } finally {
       setLoadingExperiments(false)
     }

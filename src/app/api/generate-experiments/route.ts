@@ -207,7 +207,16 @@ Formato de Saída (OBRIGATÓRIO):
       experimentsJson = experimentsJson.slice(firstBrace, lastBrace + 1)
     }
 
-    const experimentsParsed = JSON.parse(experimentsJson)
+    let experimentsParsed: any
+    try {
+      experimentsParsed = JSON.parse(experimentsJson)
+    } catch (parseErr: any) {
+      console.error('Resposta da IA não é JSON válido:', experimentsJson?.slice(0, 500))
+      return NextResponse.json(
+        { error: 'A IA retornou um formato inválido. Tente gerar novamente.' },
+        { status: 500 }
+      )
+    }
 
     // Espera objeto com strategic_vision e experiments; fallback para array puro
     let experimentsArray: any[] = []
@@ -223,20 +232,13 @@ Formato de Saída (OBRIGATÓRIO):
 
     experimentsArray = experimentsArray.slice(0, 5)
 
-    const rows = experimentsArray.map((exp: any) => {
-      let iceScore: number | null = null
-      if (exp.ice_score !== undefined && exp.ice_score !== null) {
-        const num = typeof exp.ice_score === 'number' ? exp.ice_score : Number(String(exp.ice_score).replace(',', '.'))
-        iceScore = Number.isFinite(num) ? Math.round(num) : null
-      }
-      return {
+    const rows = experimentsArray.map((exp: any) => ({
         user_id: user.id,
         hypothesis: exp.hypothesis ?? exp.title ?? '',
         variable: exp.metric ?? '',
         expected_result: exp.target ?? null,
         target_value: exp.target ?? null,
         cutoff_line: exp.cutoff_line ?? null,
-        ...(iceScore !== null && { ice_score: iceScore }),
         context_id: contextId ?? null,
         goal_id,
         status: 'backlog',
