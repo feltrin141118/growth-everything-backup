@@ -211,7 +211,13 @@ export default function GerarExperimentos() {
     setExperiments([])
 
     try {
-      const structuredAnalysis = JSON.parse(lastDiagnosis.structured_analysis)
+      let structuredAnalysis: any = lastDiagnosis.structured_analysis
+      try {
+        structuredAnalysis = JSON.parse(lastDiagnosis.structured_analysis)
+      } catch {
+        // Se o diagnóstico antigo não estiver em JSON, usamos o texto bruto
+        structuredAnalysis = lastDiagnosis.structured_analysis
+      }
       const trafficContext = (structuredAnalysis as any)?._traffic_context ?? null
 
       const response = await fetch('/api/generate-experiments', {
