@@ -127,15 +127,24 @@ Regras de Linguagem:
 - Nos campos "title" e "hypothesis", escreva em português e use esse vocabulário técnico de mídia paga.
 
 Formato de Saída (JSON Estrito):
-- Retorne EXCLUSIVAMENTE um array JSON com 5 objetos (sem texto extra antes ou depois).
-- Cada objeto DEVE ter exatamente as chaves:
-  - "title": título curto do experimento.
-  - "hypothesis": hipótese detalhada do teste.
-  - "metric": métrica específica (ex.: CPC, CTR, ROAS, CPA, taxa de retenção de vídeo).
-  - "target": valor numérico desejado para a métrica.
-  - "cutoff_line": regra objetiva de pausa (linha de corte).
-  - "ice_score": pontuação ou breve justificativa de ICE.
-- NÃO altere os nomes das chaves. Use exatamente "title", "hypothesis", "metric", "target", "cutoff_line" e "ice_score" (sem acentos, em minúsculas, no singular).
+- Retorne ESTRITAMENTE um único objeto JSON, sem qualquer texto explicativo antes ou depois, no formato:
+  {
+    "strategic_vision": "texto da visão estratégica em português",
+    "experiments": [
+      {
+        "title": "título curto do experimento",
+        "hypothesis": "hipótese detalhada do teste",
+        "metric": "métrica específica (ex.: CPC, CTR, ROAS, CPA, taxa de retenção de vídeo)",
+        "target": 0,
+        "cutoff_line": "regra objetiva de pausa (linha de corte)",
+        "ice_score": 0
+      }
+    ]
+  }
+- A propriedade "experiments" deve conter exatamente 5 objetos.
+- NÃO altere os nomes das chaves. Use exatamente "strategic_vision", "experiments", "title", "hypothesis", "metric", "target", "cutoff_line" e "ice_score".
+- O campo "ice_score" deve ser OBRIGATORIAMENTE um número inteiro (ex.: 7), nunca texto. O banco rejeita se for string.
+- Retorne APENAS o objeto JSON, sem nenhum texto explicativo antes ou depois.
 `.trim()
 
     if (goalTitle) {
@@ -187,7 +196,7 @@ Formato de Saída (JSON Estrito):
       response_format: { type: 'json_object' },
     })
 
-    const experimentsJson = completion.choices[0]?.message?.content
+    let experimentsJson = completion.choices[0]?.message?.content
 
     if (!experimentsJson) {
       return NextResponse.json(
@@ -196,36 +205,47 @@ Formato de Saída (JSON Estrito):
       )
     }
 
+    experimentsJson = experimentsJson.trim()
+    const jsonMatch = experimentsJson.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/)
+    if (jsonMatch) {
+      experimentsJson = jsonMatch[1].trim()
+    }
+
     const experimentsParsed = JSON.parse(experimentsJson)
 
-    // Garante que temos um array de experimentos (novo formato: array puro)
+    // Espera objeto com strategic_vision e experiments; fallback para array puro
     let experimentsArray: any[] = []
-    if (Array.isArray(experimentsParsed)) {
-      experimentsArray = experimentsParsed
-    } else if (experimentsParsed.experiments && Array.isArray(experimentsParsed.experiments)) {
+    if (experimentsParsed.experiments && Array.isArray(experimentsParsed.experiments)) {
       experimentsArray = experimentsParsed.experiments
+    } else if (Array.isArray(experimentsParsed)) {
+      experimentsArray = experimentsParsed
     } else {
       experimentsArray = Object.values(experimentsParsed).filter(
         (exp: any) => exp && typeof exp === 'object'
       )
     }
 
-    // Limita a 5 experimentos
     experimentsArray = experimentsArray.slice(0, 5)
 
-    // Salva os experimentos com goal_id e user_id (obrigatório para RLS)
-    const rows = experimentsArray.map((exp: any) => ({
-      user_id: user.id,
-      // title não existe na tabela; usamos hypothesis como campo principal do cartão
-      hypothesis: exp.hypothesis ?? exp.title ?? '',
-      variable: exp.metric ?? '',
-      expected_result: exp.target ?? null,
-      target_value: exp.target ?? null,
-      cutoff_line: exp.cutoff_line ?? null,
-      context_id: contextId ?? null,
-      goal_id,
-      status: 'backlog',
-    }))
+    const rows = experimentsArray.map((exp: any) => {
+      let iceScore: number | null = null
+      if (exp.ice_score !== undefined && exp.ice_score !== null) {
+        const num = typeof exp.ice_score === 'number' ? exp.ice_score : Number(String(exp.ice_score).replace(',', '.'))
+        iceScore = Number.isFinite(num) ? Math.round(num) : null
+      }
+      return {
+        user_id: user.id,
+        hypothesis: exp.hypothesis ?? exp.title ?? '',
+        variable: exp.metric ?? '',
+        expected_result: exp.target ?? null,
+        target_value: exp.target ?? null,
+        cutoff_line: exp.cutoff_line ?? null,
+        ...(iceScore !== null && { ice_score: iceScore }),
+        context_id: contextId ?? null,
+        goal_id,
+        status: 'backlog',
+      }
+    })
 
     // goal_id é obrigatório neste ponto; se estiver ausente, aborta antes do insert
     if (goal_id == null || (typeof goal_id === 'number' && Number.isNaN(goal_id))) {
